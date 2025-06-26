@@ -1,6 +1,6 @@
 // Enhanced Error Monitor - CDN Version
 // This should be served as a standalone JavaScript file
-
+console.log("askjdfnakjdsfhjksdfhkjsdkjf faksjdnfjkdsfnjksdafjk")
 (function() {
   'use strict';
   
