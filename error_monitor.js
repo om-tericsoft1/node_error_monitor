@@ -1,8 +1,6 @@
-const fs = require('fs');
-const path = require('path');
+// Enhanced Error Monitor - CDN Version
+// This should be served as a standalone JavaScript file
 
-// Error Monitor CDN Script (as string to inject)
-const errorMonitorScript = `
 (function() {
   'use strict';
   
@@ -81,6 +79,10 @@ const errorMonitorScript = `
     return formatted + (remainingArgs.length > 0 ? " " + remainingArgs.join(" ") : "");
   }
 
+  /**
+   * Enhanced Error Monitor that combines console logging interception with
+   * Next.js error detection in the DOM
+   */
   function initEnhancedErrorMonitor(options = {}) {
     const isServer = false;
     
@@ -88,16 +90,22 @@ const errorMonitorScript = `
     
     let isInitialized = false;
     let originalConsole = null;
+    
+    // For tracking to avoid duplicates
     let lastErrorHash = '';
     
     console.log("🔍 [EnhancedErrorMonitor] Initializing...");
     
+    /**
+     * Check for Next.js errors in DOM
+     */
     async function checkDomErrors() {
       console.log("Checking for Next.js errors in DOM");
       
       const portals = document.querySelectorAll('nextjs-portal');
       let foundError = false;
       
+      // Use for...of instead of forEach for async operations
       for (const portal of portals) {
         const shadow = portal.shadowRoot;
         
@@ -107,12 +115,15 @@ const errorMonitorScript = `
           const header = await waitForHeaderElement(shadow);
           
           if (header) {
+            // Serialize the DOM element for inspection
             const serializer = new XMLSerializer();
             const htmlString = serializer.serializeToString(header);
             
+            // Found a potential error in the DOM
             console.log("Found potential Next.js error element");
             foundError = true;
             
+            // Send DOM error to webhook
             await sendToWebhook({
               type: "dom",
               dom: htmlString,
@@ -120,7 +131,7 @@ const errorMonitorScript = `
             });
             
             console.log("DOM error sent to webhook");
-            return true;
+            return true; // Error found and sent
           }
         } catch (error) {
           console.error("Error checking DOM for errors:", error);
@@ -130,13 +141,23 @@ const errorMonitorScript = `
       return foundError;
     }
     
+    /**
+     * Handle console errors according to the specified flow:
+     * 1. Listen to console error
+     * 2. If found console error, check for DOM error
+     * 3. If found DOM error, send the DOM error
+     * 4. Else, send the console error
+     */
     async function handleConsoleError(method, message, args) {
-      console.log(\`Handling \${method} message:\`, message);
+      console.log(`Handling ${method} message:`, message);
       
+      // Skip non-error messages
       if (method !== "error") return;
       
+      // Check for DOM errors first
       const domErrorFound = await checkDomErrors();
       
+      // If no DOM error was found, send the console error
       if (!domErrorFound) {
         console.log("No DOM error found, sending console error");
         
@@ -159,11 +180,15 @@ const errorMonitorScript = `
       }
     }
     
+    /**
+     * Set up console interceptors
+     */
     function setupConsoleInterceptors() {
       if (isInitialized) return;
       
       console.log("Setting up console interceptors");
       
+      // Store original console methods
       originalConsole = {
         log: console.log,
         warn: console.warn,
@@ -172,13 +197,15 @@ const errorMonitorScript = `
         debug: console.debug
       };
       
+      // Only intercept errors as per requested flow
       console.error = function (...args) {
         try {
           const formatted = typeof formatMessageWithPlaceholders === 'function' 
             ? formatMessageWithPlaceholders(args[0], ...args.slice(1))
             : args.map(arg => String(arg)).join(' ');
             
-          const errorHash = \`console-error-\${formatted.substring(0, 100)}\`;
+          // Create quick hash to avoid duplicates
+          const errorHash = `console-error-${formatted.substring(0, 100)}`;
           
           if (errorHash !== lastErrorHash) {
             lastErrorHash = errorHash;
@@ -188,32 +215,48 @@ const errorMonitorScript = `
           console.log("Error in console error interceptor:", formatErr);
         }
         
+        // Always call original method
         originalConsole.error(...args);
       };
     }
     
+    /**
+     * Set up error event handlers
+     */
     function setupErrorHandlers() {
       console.log("Setting up error handlers");
       
+      // Catch uncaught errors
       window.onerror = (msg, src, line, col, err) => {
         console.log("onerror triggered:", msg);
-        console.error(\`Uncaught error: \${String(msg)}\`, err);
-        return false;
+        
+        // This will trigger our console.error handler which follows the flow
+        console.error(`Uncaught error: ${String(msg)}`, err);
+        
+        return false; // Let error propagate normally
       };
       
+      // Catch unhandled promise rejections
       window.onunhandledrejection = event => {
         console.log("onunhandledrejection triggered:", event.reason);
-        console.error(\`Unhandled promise rejection: \${String(event.reason?.message || event.reason)}\`, event.reason);
+        
+        // This will trigger our console.error handler which follows the flow
+        console.error(`Unhandled promise rejection: ${String(event.reason?.message || event.reason)}`, event.reason);
       };
     }
     
+    /**
+     * Set up efficient DOM observer for Next.js errors
+     */
     function setupNextJsErrorObserver() {
       console.log("Setting up Next.js error observer");
       
       const observer = new MutationObserver((mutations) => {
         let shouldCheck = false;
         
+        // Only process if we see relevant mutations
         for (const mutation of mutations) {
+          // Look for nextjs-portal elements or shadow DOM changes
           if (mutation.addedNodes.length > 0) {
             for (const node of mutation.addedNodes) {
               if (node.nodeName && 
@@ -226,6 +269,7 @@ const errorMonitorScript = `
             }
           }
           
+          // Also check attribute changes that might indicate error state
           if (!shouldCheck && 
               mutation.type === 'attributes' && 
               mutation.target.nodeName && 
@@ -242,6 +286,7 @@ const errorMonitorScript = `
         }
       });
       
+      // More targeted observation - only watch for portal elements and their attributes
       observer.observe(document.body, { 
         childList: true,
         subtree: true,
@@ -252,6 +297,9 @@ const errorMonitorScript = `
       return observer;
     }
     
+    /**
+     * Initialize everything
+     */
     function initialize() {
       if (isInitialized) return;
       isInitialized = true;
@@ -260,27 +308,36 @@ const errorMonitorScript = `
       setupErrorHandlers();
       const observer = setupNextJsErrorObserver();
       
+      // Initial check for any existing errors
       checkDomErrors();
       
+      // Cleanup function - expose globally if needed
       const cleanup = () => {
         console.log("Cleaning up error monitor");
         
+        // Restore console
         if (originalConsole) {
           console.error = originalConsole.error;
         }
         
+        // Remove error handlers
         window.onerror = null;
         window.onunhandledrejection = null;
+        
+        // Disconnect observer
         observer.disconnect();
         
         isInitialized = false;
         originalConsole = null;
       };
       
+      // Expose cleanup function
       window.__cleanupErrorMonitor = cleanup;
+      
       return cleanup;
     }
     
+    // Public API for manual error sending
     function sendErrorManually(error) {
       if (typeof window === 'undefined') {
         return false;
@@ -288,6 +345,8 @@ const errorMonitorScript = `
       
       try {
         const message = error?.message || String(error);
+        
+        // Follow the same flow: check DOM first, then send console error if no DOM error
         return handleConsoleError("error", message, [error]);
       } catch (err) {
         console.log("Failed to manually send error:", err);
@@ -295,8 +354,10 @@ const errorMonitorScript = `
       }
     }
     
+    // Small delay to let app initialize first
     initialize();
     
+    // Return the public API
     return {
       sendError: sendErrorManually,
       checkForErrors: checkDomErrors,
@@ -304,6 +365,7 @@ const errorMonitorScript = `
     };
   }
 
+  // Auto-initialize when DOM is ready
   function initWhenReady() {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
@@ -314,6 +376,7 @@ const errorMonitorScript = `
         });
       });
     } else {
+      // DOM is already ready
       window.__errorMonitorAPI = initEnhancedErrorMonitor({
         debug: true,
         debounceTime: 0,
@@ -322,95 +385,10 @@ const errorMonitorScript = `
     }
   }
 
+  // Start initialization
   initWhenReady();
+
+  // Expose the init function globally for manual initialization if needed
   window.__initErrorMonitor = initEnhancedErrorMonitor;
 
 })();
-`;
-
-try {
-    // Create the error monitor script file
-    const errorMonitorPath = path.join(__dirname, 'error-monitor.js');
-    fs.writeFileSync(errorMonitorPath, errorMonitorScript);
-    console.log('✅ error-monitor.js created successfully');
-
-    // Path to your Next.js app
-    const appPath = path.join(__dirname, '../app/apps/current_session');
-    
-    // Check if app directory exists
-    if (!fs.existsSync(appPath)) {
-        console.error('❌ App directory not found:', appPath);
-        console.log('Please update the appPath variable to point to your Next.js app directory');
-        process.exit(1);
-    }
-
-    // Copy error monitor to app folder (optional, for local serving)
-    const appErrorMonitorPath = path.join(appPath, 'public', 'error-monitor.js');
-    
-    // Create public directory if it doesn't exist
-    const publicDir = path.dirname(appErrorMonitorPath);
-    if (!fs.existsSync(publicDir)) {
-        fs.mkdirSync(publicDir, { recursive: true });
-    }
-    
-    fs.copyFileSync(errorMonitorPath, appErrorMonitorPath);
-    console.log('✅ error-monitor.js copied to app/public folder');
-
-    // Update layout.tsx
-    const layoutPath = path.join(appPath, 'app', 'layout.tsx');
-    
-    if (fs.existsSync(layoutPath)) {
-        let layoutContent = fs.readFileSync(layoutPath, 'utf8');
-        
-        // Check if error monitor is already added
-        if (layoutContent.includes('error-monitor.js')) {
-            console.log('⚠️  Error monitor already exists in layout.tsx');
-        } else {
-            // Add error monitor configuration
-            const errorMonitorConfig = `
-// Error Monitor Configuration
-const useLocalErrorMonitor = true; // Set to false for CDN
-const errorMonitorSrc = useLocalErrorMonitor
-    ? '/error-monitor.js' // Served from public folder
-    : 'https://your-cdn-domain.com/error-monitor.js'; // Replace with your CDN URL
-`;
-
-            // Add the script tag
-            const scriptTag = `                
-                {/* Error Monitor - Load early to catch all errors */}
-                <Script
-                    src={errorMonitorSrc}
-                    strategy="beforeInteractive"
-                    crossOrigin="anonymous"
-                />`;
-
-            // Insert configuration after existing constants
-            layoutContent = layoutContent.replace(
-                /(const isProd = process\.env\.NODE_ENV === 'production';)/,
-                `$1\n${errorMonitorConfig}`
-            );
-
-            // Insert script tag before closing </head>
-            layoutContent = layoutContent.replace(
-                /(\s+)(<\/head>)/,
-                `$1${scriptTag}\n$1$2`
-            );
-
-            fs.writeFileSync(layoutPath, layoutContent);
-            console.log('✅ layout.tsx updated with error monitor');
-        }
-    } else {
-        console.log('⚠️  layout.tsx not found at:', layoutPath);
-        console.log('Please manually add the error monitor script to your layout file');
-    }
-
-    console.log('\n🎉 Setup complete!');
-    console.log('\nNext steps:');
-    console.log('1. Your error monitor is now available at /error-monitor.js');
-    console.log('2. Start your Next.js app to test error monitoring');
-    console.log('3. For production, upload error-monitor.js to a CDN and update the URL in layout.tsx');
-
-} catch (error) {
-    console.error('❌ Error in inject.js:', error);
-    process.exit(1);
-}
